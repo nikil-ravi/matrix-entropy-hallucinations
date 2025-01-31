@@ -73,6 +73,7 @@ def predict_with_llm(
                     attention_mask=attention_mask,
                     special_token_mask=token_masks["special_token_mask"],
                     decoder_added_token_mask=token_masks["decoder_added_token_mask"],
+                    question_answer_mask=token_masks["question_answer_mask"],
                     input_length=input_length,
                     batch_idx=i,
                 )
@@ -109,6 +110,7 @@ def predict_multiple_samples(
     generate_most_likely: bool,
     low_temperature: float,
     high_temperature: float,
+    prompt_config: QaPromptConfig,
     num_generations: int,
     activation_storage: ActivationStorage | None,
     batch_size: int,
@@ -170,8 +172,11 @@ def predict_multiple_samples(
                     ), "activation_storage must be provided for GenerateDecoderOnlyOutput"
                     generated_ids = output.sequences.cpu()
                     num_samples = num_generations - 1 if temperature == "high_temperature" else 1
-
-                    token_masks = get_token_masks(generated_ids, tokenizer)
+                    token_masks = get_token_masks(
+                        token_ids=generated_ids,
+                        question_template=prompt_config.question_template,
+                        tokenizer=tokenizer,
+                    )
                     activation_storage.update(
                         model=model,
                         outputs=output,
@@ -237,7 +242,7 @@ def get_token_masks(
     question_answer_mask = torch.zeros_like(token_ids, dtype=torch.bool)
     # Find index of last question_template (e.g. "Question:") in the prompt
     for i_seq, seq in enumerate(token_ids):
-        question_tok = tokenizer(question_template, add_special_tokens=False)["input_ids"]
+        question_tok = tokenizer(question_template, add_special_tokens=False)["input_ids"][1:]
         question_start_idx = -1
         for i in range(len(seq) - len(question_tok)):
             if seq[i : i + len(question_tok)].tolist() == question_tok:
@@ -245,6 +250,8 @@ def get_token_masks(
         if question_start_idx >= 0:
             # Mask from last question to end
             question_answer_mask[i_seq, question_start_idx:] = True
+
+    assert question_answer_mask.any(), "No question found in the prompt"
 
     return {
         "special_token_mask": special_token_masks,
