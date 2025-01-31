@@ -1,6 +1,6 @@
 from collections import defaultdict
 from pathlib import Path
-from typing import Callable, Union
+from typing import Callable, Literal, Union
 
 import torch
 from torch import Tensor
@@ -10,7 +10,7 @@ from tqdm import tqdm
 def compute_metrics_from_shards(
     shard_paths: list[Path],
     metric_fn: Union[Callable[[Tensor], float], dict[str, Callable[[Tensor], float]]],
-    use_token_mask: bool,
+    token_mask: Literal["special", "qa", "none"] | None,
     device: str,
 ) -> Union[torch.Tensor, dict[str, torch.Tensor]]:
     """Process hidden states from shards and compute metrics.
@@ -19,7 +19,8 @@ def compute_metrics_from_shards(
         shard_paths: List of paths to activation shard files
         metric_fn: Either a single metric function or dict mapping metric names to functions.
                   Functions can return either a float or a dict of metric values.
-        use_token_mask: Whether to mask out special tokens
+        use_special_token_mask: Whether to mask out special tokens
+        use_qa_token_mask: Whether to mask out question and answer tokens
         device: Device to run computations on
 
     Returns:
@@ -35,15 +36,27 @@ def compute_metrics_from_shards(
         shard = torch.load(shard_path, weights_only=True, mmap=True, map_location="cpu")
 
         # Create mask for non-special tokens
-        token_mask = ~torch.bitwise_or(shard["special_token_mask"], shard["decoder_token_mask"])
-        token_mask = token_mask[:, 1:]
+        if token_mask == "special":
+            mask = ~torch.bitwise_or(shard["special_token_mask"], shard["decoder_token_mask"])
+            mask = mask.masked_fill(mask == -1, 1)
+        # Create mask for non-question-answer tokens
+        elif token_mask == "qa":
+            mask = ~torch.bitwise_or(shard["special_token_mask"], shard["decoder_token_mask"])
+            mask = torch.bitwise_and(mask, shard["question_answer_mask"])
+        # No mask
+        elif token_mask == "none":
+            mask = torch.ones_like(shard["special_token_mask"])
+        else:
+            raise ValueError(f"Invalid token mask: {token_mask}")
+        # Adjust mask for hidden states
+        mask = mask[:, 1:]
 
         for layer_idx, layer_hs in enumerate(shard["hidden_states"]):
             layer_hs = layer_hs.to(dtype=torch.float32, device=device)
 
-            for sentence_token_mask, sentence_hs in zip(token_mask, layer_hs, strict=True):
-                if use_token_mask:
-                    sentence_hs = sentence_hs[sentence_token_mask == -1]
+            for sentence_mask, sentence_hs in zip(mask, layer_hs, strict=True):
+                # Apply mask to hidden states
+                sentence_hs = sentence_hs[sentence_mask == 1]
 
                 for metric_name, fn in metric_fns.items():
                     metric_value = fn(sentence_hs)

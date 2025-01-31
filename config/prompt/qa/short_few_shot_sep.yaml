@@ -22,4 +22,4 @@ content: |
 question_key: question
 context_key: null
 shot_type: few_shot
-question_template: "Question:"
+question_template: "\nQuestion:"
