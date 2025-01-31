@@ -15,31 +15,29 @@ import torch
 from typing import List
 
 @torch.inference_mode()
-def compute_lnentropy(batch_logits: List[torch.Tensor]) -> float:
+def compute_ln_entropy(batch_scores: torch.Tensor) -> List[float]:
     """
-    Compute the length-normalized entropy of a batch of log probabilities.
+    Compute the length-normalized entropy for each sequence in a batch.
 
-   Parameters:
-    - batch_logits: List of tensors, where each tensor contains logits for a generated sequence
-                    (shape: [num_seq, vocab_size]).
+    Parameters:
+    - batch_scores: Tensor of shape [batch_size, num_tokens, vocab_size], 
+                    containing logits for a batch of generated sequences.
 
     Returns:
-    - float: The length-normalized entropy across the batch.
+    - List[float]: A list of length-normalized entropy values for each sequence.
     """
 
-    seq_entropy = []
+    batch_size, num_tokens, _ = batch_scores.shape
+    seq_entropy = np.zeros(batch_size)
 
-    for logits in batch_logits:  # Iterate over sequences
-        sequence_entropy = 0.0
-        for token_logits in logits:  # Iterate over tokens
-            # Calculate MSP for the current token
-            msp = torch.softmax(token_logits, dim=-1).max().item()
-            sequence_entropy += np.log(msp)
-        
-        # Normalize entropy for the sequence by its length
-        length_normalized_entropy = -sequence_entropy / logits.shape[0]
-        seq_entropy.append(length_normalized_entropy)
+    for ind1, logits in enumerate(batch_scores): 
+        for token_logits in logits:
+            # compute Maximum Softmax Probability (MSP)
+            msp = token_logits.softmax(dim=-1).max().item()
+            seq_entropy[ind1] += np.log(msp + 1e-6)  # Small epsilon to prevent log(0)
 
-    # Average over all sequences in the batch
-    return np.mean(seq_entropy)
+    # normalize entropy for each sequence by its length
+    ln_entropy = [-entropy / num_tokens for entropy in seq_entropy]
+    
+    return ln_entropy
 

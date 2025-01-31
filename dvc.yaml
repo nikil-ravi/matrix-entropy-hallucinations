@@ -380,6 +380,21 @@ stages:
   #   outs:
   #     - data/activations/${item.config.dataset}/${item.config.llm_instruct}/${item.generation_config}__prompt_${item.config.prompt}__seed_${item.seed}/diff_${item.metric}_pretrain.pt
 
+  compute_ln_entropy:
+    matrix:
+      <<: *activation_matrix
+      metric:
+        - ln_entropy
+      cmd: >-
+        PYTHONPATH=. python scripts/eval/compute_ln_entropy.py
+        --results-dir=data/activations/${item.config.dataset}/${item.config.llm}/${item.generation_config}__prompt_${item.config.prompt}__seed_${item.seed}
+      deps:
+        - scripts/eval/compute_ln_entropy.py
+        - data/activations/${item.config.dataset}/${item.config.llm}/${item.generation_config}__prompt_${item.config.prompt}__seed_${item.seed}/activations
+      outs:
+        - data/activations/${item.config.dataset}/${item.config.llm}/${item.generation_config}__prompt_${item.config.prompt}__seed_${item.seed}/ln_entropy.json:
+          cache: false
+
   compute_metrics:
     matrix:
       <<: *activation_matrix
